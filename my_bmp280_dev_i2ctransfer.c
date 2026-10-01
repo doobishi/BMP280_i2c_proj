@@ -29,7 +29,7 @@ static dev_t bmp280_dev_num;
 static struct class *bmp280_class;
 
 struct bmp280_data {
-    struct i2c_client *client;
+    struct i2c_client client;
     struct cdev cdev_bmp280;
     u16 dig_T1;
     s16 dig_T2;
@@ -93,9 +93,9 @@ static const struct file_operations bmp280_fops = {
     .release = bmp280_release,
 };
 
-static int bmp280_i2c_read_block(struct bmp280_data *data, u8 reg_addr, u8 len, u8 *buf)
+static int bmp280_i2c_read_block(struct i2c_client *client, u8 reg_addr, u8 len, u8 *buf)
 {
-    struct i2c_client *client = data->client;
+    struct bmp280_data* data = container_of(client, struct bmp280_data, client);
     struct i2c_msg msgs[2];
     int ret;
 
@@ -124,9 +124,9 @@ static int bmp280_i2c_read_block(struct bmp280_data *data, u8 reg_addr, u8 len, 
     return (ret < 0) ? ret : -EIO;
 }
 
-static int bmp280_i2c_write_block(struct bmp280_data *data, u8 reg_addr, u8 len, const u8 *buf)
+static int bmp280_i2c_write_block(struct i2c_client *client, u8 reg_addr, u8 len, const u8 *buf)
 {
-    struct i2c_client *client = data->client;
+    struct bmp280_data* data = container_of(client, struct bmp280_data, client);
     struct i2c_msg msg;
     int ret;
 
@@ -153,7 +153,7 @@ static int bmp280_i2c_write_block(struct bmp280_data *data, u8 reg_addr, u8 len,
 static int my_i2c_probe(struct i2c_client *client)
 {
     struct bmp280_data *bmp280data;
-    s32 chip_id;
+    u8 chip_id;
     int ret;
 
     ret = bmp280_i2c_read_block(client, BMP280_REG_CHIP_ID, 1, &chip_id);
@@ -169,7 +169,7 @@ static int my_i2c_probe(struct i2c_client *client)
     if (!bmp280data) return -ENOMEM;
 
     mutex_init(&bmp280data->lock);
-    bmp280data->client = client;
+    bmp280data->client = *client;
 
     /* Initialize and add the character device */
     cdev_init(&bmp280data->cdev_bmp280, &bmp280_fops);
@@ -191,7 +191,7 @@ static int my_i2c_probe(struct i2c_client *client)
 
 static int trigger_and_wait_for_temperature(struct i2c_client *client)
 {
-    s32 status;
+    u8 status;
     int loop_counts = 20;
     u8 mode = BMP280_MEASURE_TEMP_ONLY;
     int ret = bmp280_i2c_write_block(client, BMP280_REG_CTRL_MEAS, 1, &mode);
@@ -225,7 +225,7 @@ static int trigger_and_wait_for_temperature(struct i2c_client *client)
 
 static s32 get_temperature_alg(struct bmp280_data *data) 
 {
-    struct i2c_client *client = data->client;
+    struct i2c_client client = data->client;
     s32 var1, var2, t_fine, temperature;
     s32 adc_T;
     int ret;
@@ -234,9 +234,9 @@ static s32 get_temperature_alg(struct bmp280_data *data)
     u8 raw_buf[3];   
 
     /* 1. Read Calibration Data (6 bytes starting at 0x88) */
-    ret = bmp280_i2c_read_block(client, 0x88, 6, calib_buf);
+    ret = bmp280_i2c_read_block(&client, 0x88, 6, calib_buf);
     if (ret < 0) {
-        dev_err(&client->dev, "Failed to read sensor calibration data\n");
+        dev_err(&client.dev, "Failed to read sensor calibration data\n");
         return ret;
     }
 
@@ -246,9 +246,9 @@ static s32 get_temperature_alg(struct bmp280_data *data)
     data->dig_T3 = (s16)((calib_buf[5] << 8) | calib_buf[4]);
 
     /* 2. Read Raw Temperature Data (3 bytes starting at 0xFA) */
-    ret = bmp280_i2c_read_block(client, 0xFA, 3, raw_buf);
+    ret = bmp280_i2c_read_block(&client, 0xFA, 3, raw_buf);
     if (ret < 0) {
-        dev_err(&client->dev, "Failed to read raw temperature data\n");
+        dev_err(&client.dev, "Failed to read raw temperature data\n");
         return ret;
     }
 
@@ -263,7 +263,7 @@ static s32 get_temperature_alg(struct bmp280_data *data)
     /* Final temperature scaled by 100 */
     temperature = (t_fine * 5 + 128) >> 8;
     
-    dev_info(&client->dev, "Calculated Temperature: %d.%02d C\n",  temperature / 100, temperature % 100);
+    dev_info(&client.dev, "Calculated Temperature: %d.%02d C\n",  temperature / 100, temperature % 100);
     return temperature;
 }
 
@@ -271,7 +271,7 @@ static s32 read_and_compensate_temp(struct bmp280_data *data)
 {
     int ret;
     
-    ret = trigger_and_wait_for_temperature(data->client);
+    ret = trigger_and_wait_for_temperature(&(data->client));
     if (ret < 0)
         return -EIO;
         
