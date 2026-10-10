@@ -14,8 +14,6 @@
                 compatible = "custom,my-sensor";
                 reg = <0x76>;
                 status = "okay";
-                interrupt-parent = <&gpio1>;
-                interrupts = <12 IRQ_TYPE_EDGE_FALLING>;
             };
         };
     };
